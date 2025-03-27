@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container {
+            max-width: 800px;
+            margin-top: 2rem;
+        }
+        .video-container {
+            width: 100%;
+            max-width: 640px;
+            margin: 1rem auto;
+        }
+        #videoElement {
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .feedback-section {
+            margin-top: 2rem;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">AI Interview Assistant</h1>
+        
+        <!-- Resume Upload Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Step 1: Upload Resume</h5>
+            </div>
+            <div class="card-body">
+                <form id="resumeForm">
+                    <div class="mb-3">
+                        <label for="resumeFile" class="form-label">Choose Resume File</label>
+                        <input type="file" class="form-control" id="resumeFile" accept=".pdf,.doc,.docx" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Upload Resume</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Interview Section -->
+        <div class="card mb-4" id="interviewSection" style="display: none;">
+            <div class="card-header">
+                <h5 class="mb-0">Step 2: Interview</h5>
+            </div>
+            <div class="card-body">
+                <div class="video-container">
+                    <video id="videoElement" autoplay muted></video>
+                </div>
+                
+                <div class="mt-3">
+                    <h6>Current Question:</h6>
+                    <p id="currentQuestion" class="mb-3"></p>
+                    
+                    <div class="mb-3">
+                        <label for="responseInput" class="form-label">Your Response:</label>
+                        <textarea class="form-control" id="responseInput" rows="4" required></textarea>
+                    </div>
+                    
+                    <button id="startRecording" class="btn btn-secondary me-2">Start Recording</button>
+                    <button id="stopRecording" class="btn btn-danger me-2" style="display: none;">Stop Recording</button>
+                    <button id="submitResponse" class="btn btn-primary" disabled>Submit Response</button>
+                </div>
+                
+                <div class="loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Processing your response...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Feedback Section -->
+        <div class="feedback-section" id="feedbackSection" style="display: none;">
+            <h5>Feedback</h5>
+            <div id="feedbackContent"></div>
+        </div>
+    </div>
+    
+    <script>
+        let mediaRecorder;
+        let recordedChunks = [];
+        let currentQuestion = "";
+        let stream;
+        
+        // Initialize video stream
+        async function initializeVideo() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: true,
+                    audio: true 
+                });
+                const videoElement = document.getElementById('videoElement');
+                videoElement.srcObject = stream;
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                alert('Error accessing camera. Please make sure you have granted camera permissions.');
+            }
+        }
+        
+        // Handle resume upload
+        document.getElementById('resumeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('resumeFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/upload_resume/', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Show interview section
+                    document.getElementById('interviewSection').style.display = 'block';
+                    
+                    // Initialize video
+                    await initializeVideo();
+                    
+                    // Set first question
+                    if (data.interview && data.interview.questions) {
+                        currentQuestion = data.interview.questions[0];
+                        document.getElementById('currentQuestion').textContent = currentQuestion;
+                    }
+                    
+                    // Enable recording button
+                    document.getElementById('startRecording').disabled = false;
+                } else {
+                    alert('Error uploading resume: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error uploading resume. Please try again.');
+            }
+        });
+        
+        // Handle recording controls
+        document.getElementById('startRecording').addEventListener('click', () => {
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp8,opus'
+            });
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            
+            mediaRecorder.onstop = () => {
+                document.getElementById('submitResponse').disabled = false;
+            };
+            
+            mediaRecorder.start();
+            document.getElementById('startRecording').style.display = 'none';
+            document.getElementById('stopRecording').style.display = 'inline-block';
+        });
+        
+        document.getElementById('stopRecording').addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            document.getElementById('stopRecording').style.display = 'none';
+            document.getElementById('startRecording').style.display = 'inline-block';
+        });
+        
+        // Handle response submission
+        document.getElementById('submitResponse').addEventListener('click', async () => {
+            const responseInput = document.getElementById('responseInput');
+            const response = responseInput.value.trim();
+            
+            if (!response) {
+                alert('Please enter your response');
+                return;
+            }
+            
+            if (recordedChunks.length === 0) {
+                alert('Please record your response first');
+                return;
+            }
+            
+            // Show loading
+            document.querySelector('.loading').style.display = 'block';
+            document.getElementById('submitResponse').disabled = true;
+            
+            // Create video blob
+            const videoBlob = new Blob(recordedChunks, { 
+                type: 'video/webm;codecs=vp8,opus'
+            });
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('response', response);
+            formData.append('video_file', videoBlob, 'response.webm');
+            
+            try {
+                const response = await fetch('/process_response/', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Response data:', data); // Debug log
+                
+                // Show feedback section regardless of success/error
+                const feedbackSection = document.getElementById('feedbackSection');
+                const feedbackContent = document.getElementById('feedbackContent');
+                feedbackSection.style.display = 'block';
+                
+                if (data.status === 'success') {
+                    console.log('Processing successful response'); // Debug log
+                    
+                    // Get the actual result object from the nested structure
+                    const result = data.result && data.result.result ? data.result.result : null;
+                    
+                    let feedbackHtml = '<div class="alert alert-success">';
+                    feedbackHtml += `<p class="text-success mb-3">${data.message || 'Response processed successfully'}</p>`;
+                    
+                    // Add face analysis results if available
+                    if (result && result.face_analysis) {
+                        console.log('Face analysis:', result.face_analysis); // Debug log
+                        feedbackHtml += `
+                            <h6>Face Analysis:</h6>
+                            <p>Face Detection Rate: ${(result.face_analysis.face_detection_rate * 100).toFixed(1)}%</p>
+                            <p>Eye Contact Rate: ${(result.face_analysis.eye_contact_rate * 100).toFixed(1)}%</p>
+                            <p>Confidence Score: ${(result.face_analysis.confidence_score * 100).toFixed(1)}%</p>
+                        `;
+                        
+                        if (result.face_analysis.error) {
+                            feedbackHtml += `<p class="text-warning">Note: ${result.face_analysis.error}</p>`;
+                        }
+                    } else {
+                        console.log('No face analysis data available'); // Debug log
+                        feedbackHtml += `<p class="text-warning">Face analysis data not available</p>`;
+                    }
+                    
+                    // Add response evaluation if available
+                    if (result && result.response_evaluation) {
+                        console.log('Response evaluation:', result.response_evaluation); // Debug log
+                        const eval = result.response_evaluation;
+                        feedbackHtml += `
+                            <h6 class="mt-3">Response Evaluation:</h6>
+                            <p>Score: ${eval.score}</p>
+                            
+                            <h6>Strengths:</h6>
+                            <ul>
+                                ${eval.strengths ? eval.strengths.map(s => `<li>${s}</li>`).join('') : '<li>No strengths provided</li>'}
+                            </ul>
+                            
+                            <h6>Areas for Improvement:</h6>
+                            <ul>
+                                ${eval.areas_for_improvement ? eval.areas_for_improvement.map(a => `<li>${a}</li>`).join('') : '<li>No improvements provided</li>'}
+                            </ul>
+                            
+                            <h6>Detailed Feedback:</h6>
+                            <p>${eval.detailed_feedback || 'No detailed feedback available'}</p>
+                            
+                            <h6>Recommendations:</h6>
+                            <ul>
+                                ${eval.recommendations ? eval.recommendations.map(r => `<li>${r}</li>`).join('') : '<li>No recommendations provided</li>'}
+                            </ul>
+                        `;
+                    } else {
+                        console.log('No response evaluation data available'); // Debug log
+                        feedbackHtml += `<p class="text-warning">Response evaluation not available</p>`;
+                    }
+                    
+                    // Add interview progress if available
+                    if (data.interview_progress) {
+                        feedbackHtml += `
+                            <div class="mt-3">
+                                <p class="text-info">Question ${data.interview_progress.current_question} of ${data.interview_progress.total_questions}</p>
+                            </div>
+                        `;
+                    }
+                    
+                    feedbackHtml += '</div>';
+                    feedbackContent.innerHTML = feedbackHtml;
+                    
+                    // Clear response input and recorded chunks
+                    responseInput.value = '';
+                    recordedChunks = [];
+                    
+                    // Update to next question if available
+                    if (data.next_question) {
+                        document.getElementById('currentQuestion').textContent = data.next_question;
+                        // Reset recording buttons
+                        document.getElementById('startRecording').style.display = 'inline-block';
+                        document.getElementById('stopRecording').style.display = 'none';
+                        document.getElementById('submitResponse').disabled = true;
+                    } else {
+                        alert('Interview completed!');
+                        document.getElementById('interviewSection').style.display = 'none';
+                    }
+                } else {
+                    console.log('Error in response:', data.error); // Debug log
+                    feedbackContent.innerHTML = `
+                        <div class="alert alert-danger">
+                            <h6>Error Processing Response:</h6>
+                            <p>${data.error || 'Unknown error occurred'}</p>
+                            <p>Please try recording your response again.</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                
+                // Show error feedback
+                const feedbackSection = document.getElementById('feedbackSection');
+                const feedbackContent = document.getElementById('feedbackContent');
+                
+                feedbackSection.style.display = 'block';
+                feedbackContent.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h6>Error Processing Response:</h6>
+                        <p>${error.message}</p>
+                        <p>Please try recording your response again.</p>
+                    </div>
+                `;
+            } finally {
+                // Hide loading and reset button
+                document.querySelector('.loading').style.display = 'none';
+                document.getElementById('submitResponse').disabled = false;
+            }
+        });
+    </script>
+</body>
+</html> 

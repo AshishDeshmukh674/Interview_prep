@@ -1,0 +1,1 @@
+QORQ_API_KEY = "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"

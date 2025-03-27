@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Interview AI</title>
+</head>
+<body>
+    <h1>Upload Resume</h1>
+    <input type="file" id="resumeInput">
+    <button onclick="uploadResume()">Upload</button>
+
+    <h1>Start Interview</h1>
+    <input type="text" id="questionInput" placeholder="Enter your response">
+    <button onclick="startInterview()">Submit</button>
+
+    <script>
+        async function uploadResume() {
+            let file = document.getElementById("resumeInput").files[0];
+            let formData = new FormData();
+            formData.append("file", file);
+
+            let response = await fetch("http://127.0.0.1:8000/upload_resume/", { method: "POST", body: formData });
+            let data = await response.json();
+            alert(JSON.stringify(data));
+        }
+
+        async function startInterview() {
+            let question = document.getElementById("questionInput").value;
+            let formData = new FormData();
+            formData.append("question", question);
+
+            let response = await fetch("http://127.0.0.1:8000/start_interview/", { method: "POST", body: formData });
+            let data = await response.json();
+            alert(JSON.stringify(data));
+        }
+    </script>
+</body>
+</html>
