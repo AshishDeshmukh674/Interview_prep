@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+
+{% block title %}Interview Session - AI Interview Assistant{% endblock %}
+
+{% block extra_css %}
+<style>
+    .video-container {
+        position: relative;
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+    }
+    #videoElement {
+        width: 100%;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .feedback-container {
+        max-height: 300px;
+        overflow-y: auto;
+        margin-top: 20px;
+    }
+    .metrics-container {
+        display: flex;
+        justify-content: space-around;
+        margin: 20px 0;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+    .metric-item {
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #0d6efd;
+    }
+    .metric-label {
+        font-size: 14px;
+        color: #6c757d;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+        </div>
+        
+        <div class="metrics-container">
+            <div class="metric-item">
+                <div class="metric-value" id="eyeContactScore">0%</div>
+                <div class="metric-label">Eye Contact</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value" id="confidenceScore">0%</div>
+                <div class="metric-label">Confidence</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-value" id="clarityScore">0%</div>
+                <div class="metric-label">Clarity</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Current Question</h5>
+                <p id="currentQuestion" class="card-text">Waiting for interview to start...</p>
+                
+                <div class="mt-3">
+                    <textarea id="responseInput" class="form-control" rows="3" placeholder="Type your response here..."></textarea>
+                    <button id="submitResponse" class="btn btn-primary mt-2">Submit Response</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Real-time Feedback</h5>
+            </div>
+            <div class="card-body feedback-container">
+                <div id="feedbackList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let ws = null;
+let stream = null;
+
+async function initializeVideo() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const videoElement = document.getElementById('videoElement');
+        videoElement.srcObject = stream;
+    } catch (error) {
+        console.error('Error accessing webcam:', error);
+        alert('Error accessing webcam. Please make sure you have granted camera permissions.');
+    }
+}
+
+function connectWebSocket() {
+    ws = new WebSocket(`ws://${window.location.host}/ws/interview/${sessionId}`);
+    
+    ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        
+        switch(data.type) {
+            case 'metrics':
+                updateMetrics(data.data);
+                break;
+            case 'feedback':
+                addFeedback(data.data);
+                break;
+            case 'question':
+                updateQuestion(data.data);
+                break;
+        }
+    };
+    
+    ws.onclose = function() {
+        console.log('WebSocket connection closed');
+        setTimeout(connectWebSocket, 1000);
+    };
+}
+
+function updateMetrics(metrics) {
+    document.getElementById('eyeContactScore').textContent = `${Math.round(metrics.eye_contact * 100)}%`;
+    document.getElementById('confidenceScore').textContent = `${Math.round(metrics.confidence_score * 100)}%`;
+}
+
+function addFeedback(feedback) {
+    const feedbackList = document.getElementById('feedbackList');
+    const feedbackItem = document.createElement('div');
+    feedbackItem.className = 'alert alert-info';
+    feedbackItem.innerHTML = `
+        <strong>Feedback:</strong><br>
+        Clarity: ${Math.round(feedback.clarity * 100)}%<br>
+        Relevance: ${Math.round(feedback.relevance * 100)}%<br>
+        Technical Accuracy: ${Math.round(feedback.technical_accuracy * 100)}%<br>
+        <small>${feedback.suggestions.join('<br>')}</small>
+    `;
+    feedbackList.insertBefore(feedbackItem, feedbackList.firstChild);
+}
+
+function updateQuestion(question) {
+    document.getElementById('currentQuestion').textContent = question;
+}
+
+document.getElementById('submitResponse').addEventListener('click', function() {
+    const response = document.getElementById('responseInput').value;
+    if (response.trim()) {
+        ws.send(JSON.stringify({
+            type: 'response',
+            response: response
+        }));
+        document.getElementById('responseInput').value = '';
+    }
+});
+
+// Initialize the interview session
+const sessionId = new URLSearchParams(window.location.search).get('session_id');
+if (!sessionId) {
+    alert('No session ID provided. Redirecting to home page.');
+    window.location.href = '/';
+} else {
+    initializeVideo();
+    connectWebSocket();
+}
+</script>
+{% endblock %} 

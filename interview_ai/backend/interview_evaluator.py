@@ -1,8 +1,9 @@
 import logging
 import os
-from typing import Dict, Any
-import groq
+from typing import Dict, Any, List
+from groq import Groq
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -11,50 +12,132 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Groq client
-try:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise ValueError("GROQ_API_KEY environment variable not set")
-    client = groq.Client(api_key=api_key)
-except Exception as e:
-    logger.error(f"Failed to initialize Groq client: {str(e)}")
-    raise
-
-def evaluate_response(response: str, current_question: str, resume_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Evaluate an interview response using the Groq LLM.
+class InterviewEvaluator:
+    def __init__(self):
+        # Initialize Groq client
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY environment variable is not set")
+        
+        self.client = Groq(api_key=api_key)
     
-    Args:
-        response: The candidate's response
-        current_question: The current interview question
-        resume_data: The candidate's resume data
-        
-    Returns:
-        Dict containing the evaluation results
-    """
-    try:
-        # Prepare context from resume data
-        context = _prepare_context(resume_data)
-        
-        # Generate evaluation prompt
-        prompt = _generate_evaluation_prompt(context, current_question, response)
-        
-        # Get evaluation from Groq
-        evaluation = _get_groq_evaluation(prompt)
-        
-        # Parse and structure the evaluation
-        return _parse_evaluation(evaluation)
-        
-    except Exception as e:
-        logger.error(f"Error evaluating response: {str(e)}")
-        return {
-            "score": 0,
-            "strengths": [],
-            "areas_for_improvement": ["Unable to evaluate response due to error"],
-            "detailed_feedback": f"Error evaluating response: {str(e)}",
-            "recommendations": ["Please try again"]
-        }
+    async def generate_questions(self, resume_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Generate interview questions based on resume data.
+        """
+        try:
+            # Prepare prompt
+            prompt = f"""
+            Based on the following resume data, generate 5-7 relevant technical interview questions.
+            Focus on:
+            1. Technical skills and experience
+            2. Project details and challenges
+            3. Problem-solving abilities
+            4. System design concepts
+            5. Best practices and methodologies
+            
+            Resume Data:
+            {resume_data}
+            
+            Format each question as a JSON object with:
+            - question: The actual question
+            - category: Technical area (e.g., "Python", "System Design", "Algorithms")
+            - difficulty: Easy/Medium/Hard
+            - expected_keywords: List of key terms that should be in the answer
+            """
+            
+            # Generate questions using Groq
+            completion = self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You are an expert technical interviewer."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            # Parse questions from response
+            questions = eval(completion.choices[0].message.content)
+            return questions
+            
+        except Exception as e:
+            logger.error(f"Error generating questions: {str(e)}")
+            return []
+    
+    async def evaluate_response(
+        self,
+        response: str,
+        question: Dict[str, Any],
+        resume_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Evaluate a candidate's response to an interview question.
+        """
+        try:
+            # Prepare prompt
+            prompt = f"""
+            Evaluate the following interview response:
+            
+            Question: {question['question']}
+            Category: {question['category']}
+            Difficulty: {question['difficulty']}
+            Expected Keywords: {', '.join(question['expected_keywords'])}
+            
+            Candidate's Response:
+            {response}
+            
+            Resume Context:
+            {resume_data}
+            
+            Provide a detailed evaluation in the following JSON format:
+            {{
+                "score": float (0-1),
+                "strengths": List[str],
+                "areas_for_improvement": List[str],
+                "recommendations": List[str],
+                "feedback": str
+            }}
+            """
+            
+            # Get evaluation from Groq
+            completion = self.client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You are an expert technical interviewer providing detailed feedback."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            # Parse evaluation from response
+            evaluation = eval(completion.choices[0].message.content)
+            
+            # Add metadata
+            evaluation.update({
+                "timestamp": datetime.now().isoformat(),
+                "question_category": question["category"],
+                "question_difficulty": question["difficulty"]
+            })
+            
+            return evaluation
+            
+        except Exception as e:
+            logger.error(f"Error evaluating response: {str(e)}")
+            return {
+                "score": 0.5,
+                "strengths": [],
+                "areas_for_improvement": ["Failed to evaluate response"],
+                "recommendations": ["Please try again"],
+                "feedback": "An error occurred while evaluating your response.",
+                "timestamp": datetime.now().isoformat(),
+                "question_category": question.get("category", "Unknown"),
+                "question_difficulty": question.get("difficulty", "Unknown")
+            }
+
+# Create a global instance of InterviewEvaluator after the class definition
+evaluator = InterviewEvaluator()
 
 def _prepare_context(resume_data: Dict[str, Any]) -> str:
     """
@@ -126,7 +209,7 @@ def _get_groq_evaluation(prompt: str) -> str:
     Get evaluation from the Groq LLM.
     """
     try:
-        completion = client.chat.completions.create(
+        completion = evaluator.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "You are an expert technical interviewer providing detailed, constructive feedback."},
@@ -204,4 +287,34 @@ def _parse_evaluation(evaluation: str) -> Dict[str, Any]:
             "areas_for_improvement": [],
             "detailed_feedback": "Error parsing evaluation",
             "recommendations": []
+        }
+
+async def evaluate_response(response: str, question: str, resume_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Evaluate a candidate's response to an interview question.
+    This is a standalone function that uses the InterviewEvaluator class.
+    """
+    try:
+        # Convert question string to question dict format
+        question_dict = {
+            "question": question,
+            "category": "General",  # Default category
+            "difficulty": "Medium",  # Default difficulty
+            "expected_keywords": []  # Empty list as we don't have keywords
+        }
+        
+        # Use the evaluator instance to evaluate the response
+        evaluation = await evaluator.evaluate_response(response, question_dict, resume_data)
+        return evaluation
+    except Exception as e:
+        logger.error(f"Error in evaluate_response function: {str(e)}")
+        return {
+            "score": 0.5,
+            "strengths": [],
+            "areas_for_improvement": ["Failed to evaluate response"],
+            "recommendations": ["Please try again"],
+            "feedback": "An error occurred while evaluating your response.",
+            "timestamp": datetime.now().isoformat(),
+            "question_category": "General",
+            "question_difficulty": "Medium"
         }

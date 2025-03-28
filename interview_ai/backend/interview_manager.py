@@ -4,6 +4,7 @@ from .resume_parser import extract_resume_data
 from .face_analyzer import analyze_face
 from .interview_evaluator import evaluate_response
 from datetime import datetime
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,7 +47,7 @@ class InterviewManager:
             logger.error(f"Error starting interview: {str(e)}")
             raise
             
-    def process_response(self, response: str, video_data: bytes) -> Dict[str, Any]:
+    async def process_response(self, response: str, video_data: bytes) -> Dict[str, Any]:
         """
         Process the candidate's response and video.
         """
@@ -61,7 +62,7 @@ class InterviewManager:
             self.face_analysis_results.append(face_analysis)
             
             # Evaluate response
-            response_evaluation = evaluate_response(
+            response_evaluation = await evaluate_response(
                 response,
                 self.current_question if self.current_question else "",
                 self.resume_data if self.resume_data else {}
